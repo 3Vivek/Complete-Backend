@@ -1,7 +1,7 @@
 //to provide a common async function throughout the app
 // Method 1-------------------
 const asyncHandler=(requesHandler)=>{
-    (req,res,next)=>{
+    return (req,res,next)=>{
         Promise.resolve(requesHandler(req,res,next))
         .catch((err)=>next(err))
     }
