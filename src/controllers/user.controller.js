@@ -4,6 +4,8 @@ import { User } from "../models/user.model.js";
 import { UploadCloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
+import { Mongoose } from "mongoose";
+import { json } from "express";
 
 const generateAccessAndRefreshToken = async (userId) => {
   try {
@@ -13,7 +15,7 @@ const generateAccessAndRefreshToken = async (userId) => {
 
     user.refreshToken = refreshToken;
     await user.save({ validateBeforeSave: false });
-    console.log("*************",accessToken,"@@@@@@@@@@@@",refreshToken);
+    //console.log("AccessToken",accessToken,"RefreshToken",refreshToken);
     
     return { accessToken, refreshToken };
 
@@ -313,6 +315,136 @@ const updateUserCoverImage=asyncHandler(async(req,res)=>{
 
 })
 
+const getUserChannelProfile=asyncHandler(async(req,res)=>{
+  const {username}=req.params
+  if(!username?.trim()) throw new ApiError(400,"Username is missing");
+  //make aggregate pipeline
+  const channel=await User.aggregate([
+    {
+      $match:{
+        username:username?.toLowerCase()
+      }
+    },
+    // now we get username and want to lookup all the subscriber user have
+    {
+      $lookup:{
+        from:"subscriptions",
+        localField:"_id",
+        foreignField:"channel",
+        as:"subscribers"
+      }
+    },
+    // now number of subscribed channel user have done
+    {
+      $lookup:{
+        from:"subscriptions",
+        localField:"_id",
+        foreignField:"subscriber",
+        as:"subscribedTo"
+      }
+    },
+    //add upper result field combined them and add additonal field 
+    {
+      $addFields:{
+        subscribersCount:{
+          $size:"$subscribers"
+        },
+        channelSubscribedToCount:{
+          $size:"$subscribedTo"
+        },
+        isSubscribed:{
+          $cond:{
+            //check req.user in subscribers array if req.user exist as a subscriber exist
+            if:{$in:[req.user?._id,"$subscribers.subscriber"]},
+            then:true,
+            else:false
+          }
+        }
+      }
+    },
+    // now use projection , only give selected value 
+    {
+      $project:{
+        fullname:1,
+        username:1,
+        subscribersCount:1,
+        channelSubscribedToCount:1,
+        isSubscribed:1,
+        avtar:1,
+        coverImage:1,
+        email:1,
+      }
+    }
+  ])
+
+  if(!channel?.length) throw new ApiError(404,"Channel does not exist...!!");
+
+  return res
+  .status(200)
+  .json(
+    new ApiError(200,channel[0],"User channel fetched successfully")
+  )
+
+
+})
+
+const getWatchHistory=asyncHandler(async(req,res)=>{
+  const user=await User.aggregate9[
+    {
+      $match:{
+        //we cant directly get user._id as it is string to convert it into object we need
+        _id:new Mongoose.Types.ObjectId(req.user._id)
+      }
+    },
+    //now we need to add all the videos in watch history as per id
+    // but we also need owner name so sub-pipeline required
+    {
+      $lookup:{
+        from:"videos",
+        localField:"watchHistory",
+        foreignField:"_id",
+        as:"watchHistory",
+        pipeline:[
+          {
+            $lookup:{
+              from:"users",
+              localField:"owner",
+              foreignField:"_id",
+              as:"owner",
+              pipeline:[
+                {
+                  $project:{
+                    fullname:1,
+                    username:1,
+                    avatar:1
+                  }
+                }
+              ]
+            }
+          },
+          // now we get all details in owner array - we want to make the data structure more efficient and readable
+          {
+            $addFields:{
+              owner:{
+                $first:"$owner"
+              }
+            }
+          } 
+        ]
+      }
+    }
+  ]
+  return res
+  .status(200)
+  ,json(
+    new ApiResponse(
+      200,
+      user[0].watchHistory,
+      "Watch history fetched successfully...."
+    )
+  )
+})
+
 
 export { 
   registerUser, 
@@ -323,5 +455,7 @@ export {
   getCurrentUser ,
   updateAccountDetails,
   updateUserAvatar,
-  updateUserCoverImage
+  updateUserCoverImage,
+  getUserChannelProfile,
+  getWatchHistory
 };
